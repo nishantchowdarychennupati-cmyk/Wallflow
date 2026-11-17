@@ -6,6 +6,7 @@ struct PixabayProvider: WallpaperProvider {
     let supportedKinds: Set<WallpaperKind> = [.live]
     let signupURL: URL? = URL(string: "https://pixabay.com/api/docs/")
     let needsKey = true
+    let blurb = "Free HD and 4K videos and animations for live wallpapers."
 
     private struct Response: Decodable {
         let hits: [Hit]
@@ -13,6 +14,7 @@ struct PixabayProvider: WallpaperProvider {
             let id: Int
             let pageURL: String
             let user: String
+            let tags: String?
             let picture_id: String?
             let videos: [String: Rendition]
         }
@@ -24,20 +26,21 @@ struct PixabayProvider: WallpaperProvider {
         }
     }
 
-    func search(_ text: String, kind: WallpaperKind, page: Int) async throws -> [Wallpaper] {
+    func search(_ text: String, kind: WallpaperKind, page: Int, filters: SearchFilters) async throws -> [Wallpaper] {
+        let effectivePage = filters.sort == .random ? Int.random(in: 1...10) : page
         let url = URL.build("https://pixabay.com/api/videos/", [
             ("key", Prefs.key(name)),
             ("q", text.isEmpty ? nil : text),
-            ("order", "popular"),
+            ("order", filters.sort == .latest ? "latest" : "popular"),
             ("safesearch", "true"),
-            ("min_width", "1920"),
+            ("min_width", String(filters.minResolution.width)),
             ("per_page", "40"),
-            ("page", String(page)),
+            ("page", String(effectivePage)),
         ])
         let response: Response
         do {
             response = try await HTTP.get(url, as: Response.self)
-        } catch ProviderError.http(400) where page > 1 {
+        } catch ProviderError.http(400) where effectivePage > 1 {
             return [] // Pixabay answers 400 once you page past the last result
         }
         return response.hits.compactMap { hit in
@@ -52,10 +55,12 @@ struct PixabayProvider: WallpaperProvider {
                 ?? hit.picture_id.map { "https://i.vimeocdn.com/video/\($0)_640x360.jpg" }
             guard let preview = URL(string: previewRendition.url),
                   let thumb = thumbString.flatMap(URL.init(string:)) else { return nil }
-            return Wallpaper(id: "pixabay-v-\(hit.id)", source: name, kind: .live,
-                             thumbnailURL: thumb, previewURL: preview, fullURL: full,
-                             width: best.width, height: best.height, author: hit.user,
-                             pageURL: URL(string: hit.pageURL))
+            var w = Wallpaper(id: "pixabay-v-\(hit.id)", source: name, kind: .live,
+                              thumbnailURL: thumb, previewURL: preview, fullURL: full,
+                              width: best.width, height: best.height, author: hit.user,
+                              pageURL: URL(string: hit.pageURL))
+            if let tags = hit.tags, !tags.isEmpty { w.caption = tags.capitalized }
+            return w
         }
     }
 }

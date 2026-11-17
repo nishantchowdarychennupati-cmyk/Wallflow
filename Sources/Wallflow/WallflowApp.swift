@@ -34,7 +34,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         URLCache.shared = URLCache(memoryCapacity: 128 << 20, diskCapacity: 1 << 30)
         if Prefs.hideDockIcon { NSApp.setActivationPolicy(.accessory) }
-        Task { @MainActor in WallpaperEngine.shared.restore(from: Library.shared) }
+        Task { @MainActor in
+            WallpaperEngine.shared.restore()
+            Rotator.shared.reschedule()
+        }
     }
 
     // Keep running (and keep the live wallpaper playing) after the window is closed.
@@ -53,16 +56,17 @@ struct MenuBarContent: View {
         if engine.isLive {
             Button(engine.isPaused ? "Resume Live Wallpaper" : "Pause Live Wallpaper") { engine.togglePause() }
         }
-        Button("Shuffle from Library") {
-            if let pick = library.items.filter({ $0.id != engine.currentID }).randomElement() { try? engine.apply(pick) }
-        }
-        .disabled(library.items.count < 2)
-        Menu("Shuffle by Type") {
+        Button("Next Wallpaper") { Task { await Rotator.shared.next() } }
+            .keyboardShortcut("n")
+        Menu("Shuffle") {
             Button("Random Live Wallpaper") {
-                if let pick = library.items.filter({ $0.kind == .live }).randomElement() { try? engine.apply(pick) }
+                if let pick = library.items.filter({ $0.kind == .live && !engine.isCurrent($0.id) }).randomElement() { try? engine.apply(pick) }
             }
             Button("Random Still Wallpaper") {
-                if let pick = library.items.filter({ $0.kind == .still }).randomElement() { try? engine.apply(pick) }
+                if let pick = library.items.filter({ $0.kind == .still && !engine.isCurrent($0.id) }).randomElement() { try? engine.apply(pick) }
+            }
+            Button("Random Favorite") {
+                if let pick = library.items.filter({ library.isFavorite($0.id) && !engine.isCurrent($0.id) }).randomElement() { try? engine.apply(pick) }
             }
         }
         Divider()

@@ -6,6 +6,7 @@ struct PexelsProvider: WallpaperProvider {
     let supportedKinds: Set<WallpaperKind> = [.still, .live]
     let signupURL: URL? = URL(string: "https://www.pexels.com/api/new/")
     let needsKey = true
+    let blurb = "Photos and 4K stock videos — the best source for live wallpapers."
 
     private struct PhotoResponse: Decodable {
         let photos: [Photo]
@@ -15,6 +16,7 @@ struct PexelsProvider: WallpaperProvider {
             let height: Int
             let url: String
             let photographer: String
+            let alt: String?
             let src: [String: String]
         }
     }
@@ -39,46 +41,52 @@ struct PexelsProvider: WallpaperProvider {
         }
     }
 
-    func search(_ text: String, kind: WallpaperKind, page: Int) async throws -> [Wallpaper] {
+    func search(_ text: String, kind: WallpaperKind, page: Int, filters: SearchFilters) async throws -> [Wallpaper] {
         let headers = ["Authorization": Prefs.key(name)]
+        // Pexels has no random/latest ordering; "random" jumps to a random page instead.
+        let effectivePage = filters.sort == .random ? Int.random(in: 1...40) : page
         switch kind {
         case .still:
-            let url = text.isEmpty
-                ? URL.build("https://api.pexels.com/v1/curated", [("per_page", "40"), ("page", String(page))])
+            let url = text.isEmpty && filters.color == nil
+                ? URL.build("https://api.pexels.com/v1/curated", [("per_page", "40"), ("page", String(effectivePage))])
                 : URL.build("https://api.pexels.com/v1/search", [
-                    ("query", text), ("orientation", "landscape"), ("size", "large"),
-                    ("per_page", "40"), ("page", String(page)),
+                    ("query", text.isEmpty ? "wallpaper" : text), ("orientation", "landscape"), ("size", "large"),
+                    ("color", filters.color?.hex), ("per_page", "40"), ("page", String(effectivePage)),
                 ])
             let response = try await HTTP.get(url, headers: headers, as: PhotoResponse.self)
             return response.photos.compactMap { p in
-                guard p.width >= p.height,
+                guard p.width >= p.height, p.width >= filters.minResolution.width,
                       let thumb = (p.src["landscape"] ?? p.src["medium"]).flatMap(URL.init(string:)),
                       let preview = (p.src["large2x"] ?? p.src["large"]).flatMap(URL.init(string:)),
                       let full = p.src["original"].flatMap(URL.init(string:)) else { return nil }
-                return Wallpaper(id: "pexels-p-\(p.id)", source: name, kind: .still,
-                                 thumbnailURL: thumb, previewURL: preview, fullURL: full,
-                                 width: p.width, height: p.height, author: p.photographer,
-                                 pageURL: URL(string: p.url))
+                var w = Wallpaper(id: "pexels-p-\(p.id)", source: name, kind: .still,
+                                  thumbnailURL: thumb, previewURL: preview, fullURL: full,
+                                  width: p.width, height: p.height, author: p.photographer,
+                                  pageURL: URL(string: p.url))
+                if let alt = p.alt, !alt.isEmpty { w.caption = alt }
+                return w
             }
         case .live:
             let url = text.isEmpty
                 ? URL.build("https://api.pexels.com/videos/popular", [
-                    ("min_width", "1920"), ("per_page", "40"), ("page", String(page)),
+                    ("min_width", String(filters.minResolution.width)), ("per_page", "40"), ("page", String(effectivePage)),
                 ])
                 : URL.build("https://api.pexels.com/videos/search", [
-                    ("query", text), ("orientation", "landscape"), ("size", "large"),
-                    ("per_page", "40"), ("page", String(page)),
+                    ("query", text), ("orientation", "landscape"), ("size", filters.minResolution.width >= 3840 ? "large" : "medium"),
+                    ("per_page", "40"), ("page", String(effectivePage)),
                 ])
             let response = try await HTTP.get(url, headers: headers, as: VideoResponse.self)
             return response.videos.compactMap { v in
                 guard v.width >= v.height,
-                      let full = Self.pick(v.video_files, maxWidth: 3840).flatMap({ URL(string: $0.link) }),
+                      let best = Self.pick(v.video_files, maxWidth: 4096),
+                      (best.width ?? 0) >= filters.minResolution.width,
+                      let full = URL(string: best.link),
                       let preview = Self.pick(v.video_files, maxWidth: 1280).flatMap({ URL(string: $0.link) }),
                       let thumb = URL(string: v.image) else { return nil }
                 return Wallpaper(id: "pexels-v-\(v.id)", source: name, kind: .live,
                                  thumbnailURL: thumb, previewURL: preview, fullURL: full,
-                                 width: v.width, height: v.height, author: v.user.name,
-                                 pageURL: URL(string: v.url))
+                                 width: best.width ?? v.width, height: best.height ?? v.height,
+                                 author: v.user.name, pageURL: URL(string: v.url))
             }
         }
     }

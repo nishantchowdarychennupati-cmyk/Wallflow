@@ -45,7 +45,8 @@ protocol WallpaperProvider {
     var supportedKinds: Set<WallpaperKind> { get }
     var signupURL: URL? { get }
     var needsKey: Bool { get }
-    func search(_ text: String, kind: WallpaperKind, page: Int) async throws -> [Wallpaper]
+    var blurb: String { get }
+    func search(_ text: String, kind: WallpaperKind, page: Int, filters: SearchFilters) async throws -> [Wallpaper]
 }
 
 extension WallpaperProvider {
@@ -54,5 +55,8 @@ extension WallpaperProvider {
 }
 
 enum Providers {
-    static let all: [WallpaperProvider] = [WallhavenProvider(), UnsplashProvider(), PexelsProvider(), PixabayProvider()]
+    static let all: [WallpaperProvider] = [
+        WallhavenProvider(), UnsplashProvider(), PexelsProvider(), PixabayProvider(), BingProvider(),
+    ]
+    static func named(_ name: String) -> WallpaperProvider? { all.first { $0.name == name } }
 }

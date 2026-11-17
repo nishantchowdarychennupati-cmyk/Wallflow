@@ -3,19 +3,25 @@
 A native SwiftUI app for macOS 14 Sonoma and later, on Apple Silicon or Intel.
 
 ## Features
-- **Huge catalog, one search box.** Searches several free wallpaper services at once and blends the results into one endlessly scrolling grid:
+- **Huge 4K catalog, one search box.** Searches several free sources at once and blends the results into one endlessly scrolling grid:
   | Source | Content | Key |
   |---|---|---|
-  | Wallhaven | 1M+ community wallpapers (filtered to safe-for-work, 1440p+) | not needed |
-  | Unsplash | high-quality photos | free |
-  | Pexels | photos **and** HD/4K videos (live) | free |
-  | Pixabay | HD/4K videos (live) | free |
-- **Live wallpapers.** Videos play behind your desktop icons on every display and every Space, on a smooth, silent loop.
-- **Battery friendly.** Playback pauses when the desktop is covered by a full-screen app, when displays sleep, when the Mac is locked, and optionally on battery power.
-- **Lock screen**
-  - Always: the live wallpaper's first frame is set as the system wallpaper, so the lock screen, login window and Mission Control match it.
-  - **Experimental:** the live video can play on the lock screen itself (see below).
-- **Library.** Save wallpapers, import your own images and videos (`.mov`/`.mp4`), double-click to apply, and shuffle from the menu bar.
+  | Wallhaven | 1M+ community wallpapers, a huge 4K/5K/8K collection (safe-for-work only) | not needed |
+  | Bing Wallpaper of the Day | a new hand-picked 4K photo every day | not needed |
+  | Unsplash | professional photos, originals usually 4K–8K | free |
+  | Pexels | photos **and** 4K videos (live) | free |
+  | Pixabay | HD/4K videos and animations (live) | free |
+- **Filters:** minimum resolution (Full HD+, 1440p+, **4K+** by default, 5K+), sort (Popular, Latest, Random), colour swatches and 20 one-click topics.
+- **Browse by source** in the sidebar, or all at once.
+- **Live previews:** live wallpapers start playing when you hover over them, in Discover and in your Library.
+- **Favourites:** click the heart on any wallpaper to save it in Full resolution and add it to Favourites.
+- **Live wallpapers** play behind your desktop icons on every display and every Space, on a seamless, silent loop. You can set the speed (0.25×–2×), choose Fill or Fit, and dim the video (0–70%).
+- **Auto-rotate:** change the wallpaper every 5 minutes up to once a day. Pick from your Library, your Favourites, or **new 4K wallpapers from the internet** for any search term. "Next Wallpaper" (⌘N) is also in the menu bar.
+- **A different wallpaper on each display.**
+- **Battery friendly:** playback pauses when a full-screen app covers the desktop, when displays sleep, when the Mac is locked, and optionally on battery power.
+- **Lock screen:** the live wallpaper's first frame is shown on the lock screen and login window. There's also an *experimental* option that plays the video itself on the lock screen (see below).
+- **Clean desktop mode:** hide desktop icons with one switch.
+- **Library:** import your own images and videos, see how much space wallpapers use, and show the folder in Finder.
 - **Menu bar icon**, Launch at Login and a Hide Dock icon option.
 
 ## Build & install

@@ -2,18 +2,28 @@ import AppKit
 import AVFoundation
 import IOKit.ps
 
+extension NSScreen {
+    /// Stable identifier for a display.
+    var wallflowKey: String {
+        (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.stringValue ?? localizedName
+    }
+}
+
 /// Applies wallpapers. Still images go through NSWorkspace; live wallpapers are played in a
-/// borderless window that sits at desktop level (below desktop icons) on every screen and Space.
+/// borderless window at desktop level (below desktop icons) on each display and every Space.
+/// Each display can have its own wallpaper; "*" is the default for all displays.
 @MainActor
 final class WallpaperEngine: ObservableObject {
     static let shared = WallpaperEngine()
 
-    @Published private(set) var currentID: String? = UserDefaults.standard.string(forKey: "currentWallpaperID")
+    @Published private(set) var assignments: [String: String]
     @Published private(set) var isLive = false
     @Published private(set) var isPaused = false
 
-    private var liveURL: URL?
-    private var screens: [LiveScreen] = []
+    var currentID: String? { assignments["*"] ?? assignments.values.first }
+    func isCurrent(_ id: String) -> Bool { assignments.values.contains(id) }
+
+    private var windows: [String: LiveScreen] = [:]
     private var userPaused = false
     private var screensAsleep = false
     private var sessionInactive = false
@@ -21,75 +31,81 @@ final class WallpaperEngine: ObservableObject {
     private var tokens: [NSObjectProtocol] = []
     private var powerTimer: Timer?
 
-    private init() { observeSystem() }
-
-    func apply(_ item: LocalWallpaper) throws {
-        switch item.kind {
-        case .still:
-            stopLive()
-            try setDesktopPicture(item.fileURL)
-        case .live:
-            // The first frame becomes the system wallpaper, so the lock screen, login window and
-            // Mission Control match the live wallpaper.
-            if FileManager.default.fileExists(atPath: item.posterURL.path) {
-                try? setDesktopPicture(item.posterURL)
-            }
-            startLive(item.fileURL)
+    private init() {
+        assignments = UserDefaults.standard.dictionary(forKey: "wallpaperAssignments") as? [String: String] ?? [:]
+        if assignments.isEmpty, let legacy = UserDefaults.standard.string(forKey: "currentWallpaperID") {
+            assignments = ["*": legacy]
         }
-        currentID = item.id
-        UserDefaults.standard.set(item.id, forKey: "currentWallpaperID")
+        observeSystem()
     }
 
-    /// Called at launch so a live wallpaper survives app restarts and reboots (with Launch at Login).
-    func restore(from library: Library) {
-        guard let id = currentID, let item = library.item(id: id), item.kind == .live else { return }
-        startLive(item.fileURL)
+    /// Apply to every display (screen == nil) or a single display.
+    func apply(_ item: LocalWallpaper, to screen: NSScreen? = nil) throws {
+        if let screen { assignments[screen.wallflowKey] = item.id } else { assignments = ["*": item.id] }
+        UserDefaults.standard.set(assignments, forKey: "wallpaperAssignments")
+        try refresh()
     }
+
+    /// Called at launch so live wallpapers survive app restarts and reboots (with Launch at Login).
+    func restore() { try? refresh() }
 
     func togglePause() {
         userPaused.toggle()
         updatePlayback()
     }
 
-    func stopLive() {
-        liveURL = nil
-        screens.forEach { $0.close() }
-        screens = []
-        isLive = false
-    }
-
     // MARK: - Internals
 
-    private func setDesktopPicture(_ url: URL) throws {
+    private func refresh() throws {
+        var firstError: Error?
+        var liveKeys = Set<String>()
         for screen in NSScreen.screens {
-            try NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: [
-                .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
-                .allowClipping: true,
-            ])
+            let key = screen.wallflowKey
+            guard let id = assignments[key] ?? assignments["*"], let item = Library.shared.item(id: id) else { continue }
+            do {
+                switch item.kind {
+                case .still:
+                    try setDesktopPicture(item.fileURL, on: screen)
+                case .live:
+                    // The first frame becomes the system wallpaper, so the lock screen, login window and
+                    // Mission Control match the live wallpaper.
+                    if FileManager.default.fileExists(atPath: item.posterURL.path) {
+                        try? setDesktopPicture(item.posterURL, on: screen)
+                    }
+                    liveKeys.insert(key)
+                    if let existing = windows[key], existing.url == item.fileURL {
+                        existing.place(on: screen)
+                    } else {
+                        windows[key]?.close()
+                        windows[key] = LiveScreen(screen: screen, url: item.fileURL) { [weak self] in self?.updatePlayback() }
+                    }
+                }
+            } catch {
+                firstError = firstError ?? error
+            }
         }
-    }
-
-    private func startLive(_ url: URL) {
-        liveURL = url
-        rebuildWindows()
-    }
-
-    private func rebuildWindows() {
-        screens.forEach { $0.close() }
-        screens = []
-        guard let url = liveURL else { isLive = false; return }
-        screens = NSScreen.screens.map { screen in
-            LiveScreen(screen: screen, url: url) { [weak self] in self?.updatePlayback() }
+        for (key, window) in windows where !liveKeys.contains(key) {
+            window.close()
+            windows[key] = nil
         }
-        isLive = true
+        isLive = !windows.isEmpty
+        windows.values.forEach { $0.applySettings() }
         updatePlayback()
+        if let firstError { throw firstError }
+    }
+
+    private func setDesktopPicture(_ url: URL, on screen: NSScreen) throws {
+        try NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: [
+            .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
+            .allowClipping: true,
+        ])
     }
 
     private func updatePlayback() {
         let paused = userPaused || screensAsleep || sessionInactive || (Prefs.pauseOnBattery && onBattery)
         isPaused = paused
         // Each screen also pauses itself when fully covered (e.g. a full-screen app) to save battery.
-        screens.forEach { $0.sync(paused: paused) }
+        windows.values.forEach { $0.sync(paused: paused) }
     }
 
     private func observeSystem() {
@@ -103,7 +119,11 @@ final class WallpaperEngine: ObservableObject {
         on(ws, NSWorkspace.screensDidWakeNotification) { $0.screensAsleep = false; $0.updatePlayback() }
         on(ws, NSWorkspace.sessionDidResignActiveNotification) { $0.sessionInactive = true; $0.updatePlayback() }
         on(ws, NSWorkspace.sessionDidBecomeActiveNotification) { $0.sessionInactive = false; $0.updatePlayback() }
-        on(.default, NSApplication.didChangeScreenParametersNotification) { $0.rebuildWindows() }
+        on(.default, NSApplication.didChangeScreenParametersNotification) { try? $0.refresh() }
+        on(.default, UserDefaults.didChangeNotification) { engine in
+            engine.windows.values.forEach { $0.applySettings() }
+            engine.updatePlayback()
+        }
 
         checkPower()
         powerTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
@@ -112,7 +132,7 @@ final class WallpaperEngine: ObservableObject {
     }
 
     private func checkPower() {
-        let source = IOPSGetProvidingPowerSourceType(nil)?.takeUnretainedValue() as String?
+        let source: String? = IOPSGetProvidingPowerSourceType(nil)?.takeUnretainedValue() as String?
         let battery = source == "Battery Power"
         if battery != onBattery { onBattery = battery; updatePlayback() }
     }
@@ -121,12 +141,13 @@ final class WallpaperEngine: ObservableObject {
 /// One desktop-level video window for one display.
 @MainActor
 private final class LiveScreen: NSObject {
+    let url: URL
     private let window: NSWindow
     private let playerView: LoopingPlayerNSView
     private let onVisibilityChange: @MainActor () -> Void
-    private var paused = false
 
     init(screen: NSScreen, url: URL, onVisibilityChange: @escaping @MainActor () -> Void) {
+        self.url = url
         self.onVisibilityChange = onVisibilityChange
         playerView = LoopingPlayerNSView(url: url)
         window = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -140,8 +161,9 @@ private final class LiveScreen: NSObject {
         window.backgroundColor = .black
         window.isReleasedWhenClosed = false
         window.contentView = playerView
-        window.setFrame(screen.frame, display: true)
+        place(on: screen)
         window.orderFront(nil)
+        applySettings()
 
         NotificationCenter.default.addObserver(self, selector: #selector(occlusionChanged),
                                                name: NSWindow.didChangeOcclusionStateNotification, object: window)
@@ -149,8 +171,13 @@ private final class LiveScreen: NSObject {
 
     @objc private func occlusionChanged(_ note: Notification) { onVisibilityChange() }
 
+    func place(on screen: NSScreen) { window.setFrame(screen.frame, display: true) }
+
+    func applySettings() {
+        playerView.configure(fill: Prefs.videoFill, rate: Prefs.playbackRate, dim: Prefs.dimLevel)
+    }
+
     func sync(paused: Bool) {
-        self.paused = paused
         if paused || !window.occlusionState.contains(.visible) { playerView.pause() } else { playerView.play() }
     }
 

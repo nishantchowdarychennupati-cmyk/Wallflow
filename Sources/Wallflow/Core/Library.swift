@@ -9,6 +9,7 @@ final class Library: ObservableObject {
 
     @Published private(set) var items: [LocalWallpaper] = []
     @Published private(set) var inFlight: Set<String> = []
+    @Published private(set) var favorites: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "favorites") ?? [])
 
     let folder: URL
     private var indexURL: URL { folder.appendingPathComponent("library.json") }
@@ -24,6 +25,24 @@ final class Library: ObservableObject {
     }
 
     func item(id: String) -> LocalWallpaper? { items.first { $0.id == id } }
+
+    func isFavorite(_ id: String) -> Bool { favorites.contains(id) }
+
+    func toggleFavorite(_ id: String) {
+        if favorites.contains(id) { favorites.remove(id) } else { favorites.insert(id) }
+        UserDefaults.standard.set(Array(favorites), forKey: "favorites")
+    }
+
+    /// Bytes used by the library folder.
+    func diskUsage() -> Int64 {
+        let keys: Set<URLResourceKey> = [.totalFileAllocatedSizeKey]
+        guard let files = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: Array(keys)) else { return 0 }
+        var total: Int64 = 0
+        for case let url as URL in files {
+            total += Int64((try? url.resourceValues(forKeys: keys))?.totalFileAllocatedSize ?? 0)
+        }
+        return total
+    }
 
     func download(_ wallpaper: Wallpaper) async throws -> LocalWallpaper {
         if let existing = item(id: wallpaper.id) { return existing }
@@ -77,6 +96,7 @@ final class Library: ObservableObject {
         try? FileManager.default.removeItem(at: item.fileURL)
         if item.kind == .live { try? FileManager.default.removeItem(at: item.posterURL) }
         items.removeAll { $0.id == item.id }
+        if favorites.contains(item.id) { toggleFavorite(item.id) }
         save()
     }
 
