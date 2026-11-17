@@ -3,8 +3,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-swift build -c release --arch arm64 --arch x86_64 2>/dev/null || swift build -c release
-BIN="$(swift build -c release --show-bin-path)/Wallflow"
+if swift build -c release --arch arm64 --arch x86_64; then
+    BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/Wallflow"   # universal (Apple Silicon + Intel)
+else
+    swift build -c release
+    BIN="$(swift build -c release --show-bin-path)/Wallflow"
+fi
 
 APP="build/Wallflow.app"
 rm -rf "$APP"
