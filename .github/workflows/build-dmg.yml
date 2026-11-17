@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: dmg-${{ github.ref }}
   cancel-in-progress: true
@@ -22,3 +25,13 @@ jobs:
         with:
           name: Wallflow-dmg
           path: build/Wallflow.dmg
+      - name: Publish release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v1.0.${{ github.run_number }}"
+          gh release create "$TAG" build/Wallflow.dmg \
+            --title "Wallflow $TAG" \
+            --notes "Download **Wallflow.dmg**, open it and drag Wallflow into Applications. First launch: right-click Wallflow › Open (the app is not notarized)." \
+            --latest
